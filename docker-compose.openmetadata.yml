@@ -1,0 +1,175 @@
+# ============================================================
+# health-iot-lakehouse — OpenMetadata stack
+#
+# Services:
+#   om-mysql         — metadata store for OpenMetadata
+#   om-elasticsearch — search/index engine
+#   om-server        — OpenMetadata API + UI (port 8585)
+#
+# Connects to the existing `lakehouse-net` network so it can
+# reach lh-trino (trino:8080) and lh-postgres directly.
+#
+# Start: docker compose -f docker-compose.openmetadata.yml up -d
+# UI:    http://localhost:8585  (admin / admin)
+# ============================================================
+
+networks:
+  # Attach to the existing lakehouse-net so OpenMetadata can
+  # reach Trino, MinIO, and Postgres via their container names.
+  # The actual network name includes the compose project prefix.
+  lakehouse-net:
+    external: true
+    name: health-iot-lakehouse_lakehouse-net
+
+volumes:
+  om-mysql-data:
+  om-es-data:
+
+services:
+
+  # ----------------------------------------------------------
+  # MySQL 8 — OpenMetadata metadata store
+  # (separate from the Iceberg catalog Postgres)
+  # ----------------------------------------------------------
+  om-mysql:
+    image: mysql:8.0
+    container_name: lh-om-mysql
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${OM_MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${OM_MYSQL_USER}
+      MYSQL_PASSWORD: ${OM_MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${OM_MYSQL_DATABASE}
+    volumes:
+      - om-mysql-data:/var/lib/mysql
+    networks:
+      - lakehouse-net
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root --password=\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # Elasticsearch 8 — search + indexing for OpenMetadata
+  # ----------------------------------------------------------
+  om-elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.2
+    container_name: lh-om-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms384m -Xmx384m"
+      xpack.security.enabled: "false"
+    volumes:
+      - om-es-data:/usr/share/elasticsearch/data
+    networks:
+      - lakehouse-net
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ----------------------------------------------------------
+  # OpenMetadata DB migrate — one-shot bootstrap
+  # Runs Flyway migrations on the MySQL schema, then exits.
+  # om-server will not start until this completes.
+  # ----------------------------------------------------------
+  om-migrate:
+    image: docker.getcollate.io/openmetadata/server:1.5.0
+    container_name: lh-om-migrate
+    restart: "no"
+    command: "./bootstrap/openmetadata-ops.sh migrate"
+    env_file: .env
+    environment:
+      DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+      DB_SCHEME: mysql
+      DB_USER: ${OM_MYSQL_USER}
+      DB_USER_PASSWORD: ${OM_MYSQL_PASSWORD}
+      DB_HOST: om-mysql
+      DB_PORT: 3306
+      OM_DATABASE: ${OM_MYSQL_DATABASE}
+      ELASTICSEARCH_HOST: om-elasticsearch
+      ELASTICSEARCH_PORT: "9200"
+      ELASTICSEARCH_SCHEME: http
+      SERVER_HOST_API_URL: "http://localhost:8585/api"
+      AUTHENTICATION_PROVIDER: basic
+      JWT_ISSUER: "open-metadata.org"
+      JWT_KEY_ID: "Gb389a-9f76-gdjs-a92j-0242bk94356"
+    networks:
+      - lakehouse-net
+    depends_on:
+      om-mysql:
+        condition: service_healthy
+      om-elasticsearch:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # OpenMetadata Server — API + UI
+  # UI:  http://localhost:8585
+  # Default credentials: admin / admin
+  # ----------------------------------------------------------
+  om-server:
+    image: docker.getcollate.io/openmetadata/server:1.5.0
+    container_name: lh-om-server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Database
+      DB_DRIVER_CLASS: com.mysql.cj.jdbc.Driver
+      DB_SCHEME: mysql
+      DB_USER: ${OM_MYSQL_USER}
+      DB_USER_PASSWORD: ${OM_MYSQL_PASSWORD}
+      DB_HOST: om-mysql
+      DB_PORT: 3306
+      OM_DATABASE: ${OM_MYSQL_DATABASE}
+
+      # Elasticsearch
+      ELASTICSEARCH_HOST: om-elasticsearch
+      ELASTICSEARCH_PORT: "9200"
+      ELASTICSEARCH_SCHEME: http
+      ELASTICSEARCH_INDEX_MAPPING_LANG: EN
+
+      # Server
+      SERVER_HOST_API_URL: "http://localhost:8585/api"
+      AUTHENTICATION_PROVIDER: basic
+      AUTHORIZER_CLASS_NAME: org.openmetadata.service.security.DefaultAuthorizer
+      AUTHORIZER_REQUEST_FILTER: org.openmetadata.service.security.JwtFilter
+      AUTHORIZER_ADMIN_PRINCIPALS: "[admin]"
+      AUTHORIZER_ALLOWED_REGISTRATION_DOMAIN: "['all']"
+      JWT_ISSUER: "open-metadata.org"
+      JWT_KEY_ID: "Gb389a-9f76-gdjs-a92j-0242bk94356"
+
+      # Pipeline Service (for ingestion — points to Airflow)
+      PIPELINE_SERVICE_CLIENT_CLASS_NAME: "org.openmetadata.service.clients.pipeline.airflow.AirflowRESTClient"
+      PIPELINE_SERVICE_IP_INFO_ENABLED: "false"
+      AIRFLOW_HOST: "http://lh-airflow-webserver:8080"
+      SERVER_STARTTIME_LIMIT_SECS: "60"
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
+      AIRFLOW_TIMEOUT: "10"
+      AIRFLOW_TRUST_STORE_PATH: ""
+      AIRFLOW_TRUST_STORE_PASSWORD: ""
+
+    ports:
+      - "8585:8585"
+      - "8586:8586"
+    networks:
+      - lakehouse-net
+    depends_on:
+      om-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8585/api/v1/system/version | grep -q 'version' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 120s

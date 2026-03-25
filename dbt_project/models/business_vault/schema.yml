@@ -1,0 +1,116 @@
+version: 2
+
+models:
+  - name: bsat_daily_vitals_agg
+    description: >
+      Business vault satellite with daily aggregate statistics per patient per
+      metric. One row per (patient_hk, metric_code, report_date).
+      Inputs: sat_reading_value.
+    columns:
+      - name: patient_hk
+        description: FK to hub_patient
+        tests:
+          - not_null
+      - name: metric_code
+        tests:
+          - not_null
+      - name: report_date
+        tests:
+          - not_null
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: reading_count
+        tests:
+          - not_null
+      - name: value_mean
+        tests:
+          - not_null
+      - name: completeness_pct
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 110  # allow slight over-sampling
+
+  - name: bsat_anomaly_score
+    description: >
+      Business vault satellite with daily anomaly z-scores per patient.
+      One row per (patient_hk, report_date). Requires at least one prior day
+      of data for z-score computation.
+      Inputs: bsat_daily_vitals_agg.
+    columns:
+      - name: patient_hk
+        tests:
+          - not_null
+      - name: report_date
+        tests:
+          - not_null
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: hr_zscore
+        description: Absolute z-score of daily HR vs 30-day baseline
+        tests:
+          - not_null
+      - name: spo2_zscore
+        description: Directional z-score — low SpO2 produces high positive score
+        tests:
+          - not_null
+      - name: steps_zscore
+        tests:
+          - not_null
+      - name: composite_anomaly_score
+        tests:
+          - not_null
+      - name: anomaly_flag
+        tests:
+          - not_null
+
+  - name: bsat_patient_risk_profile
+    description: >
+      Patient-level risk profile combining demographics, chronic conditions,
+      and recent vital sign anomaly trends. One row per (patient_hk, report_date).
+      Inputs: sat_patient_demographics, bsat_anomaly_score, bsat_daily_vitals_agg.
+    columns:
+      - name: patient_hk
+        tests:
+          - not_null
+      - name: report_date
+        tests:
+          - not_null
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: age
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 130
+      - name: condition_count
+        tests:
+          - not_null
+      - name: has_diabetes
+        tests:
+          - not_null
+      - name: has_hypertension
+        tests:
+          - not_null
+      - name: has_cardiac_condition
+        tests:
+          - not_null
+      - name: risk_tier
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["low", "moderate", "high", "critical"]

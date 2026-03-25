@@ -1,0 +1,95 @@
+version: 2
+
+models:
+  - name: lnk_patient_device
+    description: >
+      Data Vault link connecting patients to their wearable devices.
+      Derived from stg_readings — any reading implies a patient-device relationship.
+    columns:
+      - name: patient_device_hk
+        description: MD5 of (patient_id || device_serial) — composite link key
+        tests:
+          - not_null
+          - unique
+      - name: patient_hk
+        description: FK to hub_patient
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_patient')
+              field: patient_hk
+      - name: device_hk
+        description: FK to hub_device
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_device')
+              field: device_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+
+  - name: lnk_device_metric
+    description: >
+      Data Vault link connecting devices to the metric types they capture.
+      Derived from stg_readings — a reading implies device capability.
+    columns:
+      - name: device_metric_hk
+        description: MD5 of (device_serial || metric_code) — composite link key
+        tests:
+          - not_null
+          - unique
+      - name: device_hk
+        description: FK to hub_device
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_device')
+              field: device_hk
+      - name: metric_type_hk
+        description: FK to hub_metric_type
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_metric_type')
+              field: metric_type_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+
+  - name: lnk_reading_alert
+    description: >
+      Data Vault link connecting a specific reading to the alert it triggered.
+      Only exists for readings that breach a clinical threshold.
+    columns:
+      - name: reading_alert_hk
+        description: MD5 of (reading_id || alert_id) — composite link key
+        tests:
+          - not_null
+          - unique
+      - name: reading_hk
+        description: FK to hub_reading
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_reading')
+              field: reading_hk
+      - name: alert_hk
+        description: FK to hub_alert
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_alert')
+              field: alert_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null

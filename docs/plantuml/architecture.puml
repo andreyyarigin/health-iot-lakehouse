@@ -1,0 +1,86 @@
+@startuml architecture
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam ArrowColor #555555
+skinparam ArrowThickness 1.5
+
+skinparam component {
+  BackgroundColor #E8F4FD
+  BorderColor #2980B9
+  FontColor #1A1A1A
+}
+
+skinparam database {
+  BackgroundColor #FEF9E7
+  BorderColor #F39C12
+  FontColor #1A1A1A
+}
+
+skinparam rectangle {
+  BackgroundColor #EAF7EA
+  BorderColor #27AE60
+  FontColor #1A1A1A
+}
+
+skinparam cloud {
+  BackgroundColor #F5EEF8
+  BorderColor #8E44AD
+  FontColor #1A1A1A
+}
+
+title Health IoT Lakehouse — Architecture
+
+rectangle "Data Sources" {
+  component "Synthea\n(patients.csv\nconditions.csv)" as synthea
+  component "Wearable\nSimulator\n(Python)" as simulator
+}
+
+rectangle "Landing Zone" {
+  database "MinIO\ns3://raw/" as minio_raw
+}
+
+rectangle "Lakehouse (Iceberg on MinIO)" {
+  database "MinIO\ns3://warehouse/" as minio_wh
+
+  rectangle "Iceberg REST Catalog\n(PostgreSQL)" as catalog
+}
+
+rectangle "Compute" {
+  component "Trino" as trino
+  component "dbt-trino\n(22 models)" as dbt
+}
+
+rectangle "Orchestration" {
+  component "Airflow\nCeleryExecutor" as airflow
+  component "Redis\n(Celery broker)" as redis
+}
+
+rectangle "Data Catalog" {
+  component "OpenMetadata\n(lineage + catalog)" as om
+}
+
+rectangle "Consumption" {
+  component "ML Pipeline\n(PyArrow / pandas)" as ml
+  component "BI\n(Trino SQL)" as bi
+}
+
+synthea --> minio_raw
+simulator --> minio_raw : NDJSON daily
+
+airflow --> simulator : trigger
+airflow --> dbt : trigger
+redis --> airflow : task queue
+
+minio_raw --> trino : external tables
+trino --> minio_wh : write Parquet
+trino --> catalog : metadata R/W
+dbt --> trino : CTAS queries
+
+minio_wh --> ml : PyArrow read
+trino --> bi : SQL
+
+dbt --> om : manifest.json
+trino --> om : schema discovery
+
+@enduml

@@ -1,0 +1,47 @@
+@startuml data_flow
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam ArrowColor #555555
+skinparam ArrowThickness 1.5
+skinparam sequenceArrowThickness 1.5
+
+skinparam participant {
+  BackgroundColor #E8F4FD
+  BorderColor #2980B9
+  FontColor #1A1A1A
+}
+
+title Health IoT Lakehouse — Daily Data Flow
+
+participant "Wearable\nSimulator" as sim
+participant "MinIO\ns3://raw/" as raw
+participant "dbt staging" as staging
+participant "dbt raw_vault" as rv
+participant "dbt business_vault" as bv
+participant "dbt marts" as marts
+participant "ML Pipeline" as ml
+
+== Daily batch (02:00 UTC) ==
+
+sim -> raw : readings.json\nalerts.json (NDJSON)
+
+raw -> staging : Trino external tables\nstg_patients, stg_readings\nstg_alerts, stg_conditions
+
+staging -> rv : hub_patient, hub_device\nhub_reading, hub_alert\nlnk_patient_device\nlnk_device_metric\nsat_reading_value\nsat_reading_context\nsat_alert_detail
+
+rv -> bv : bsat_daily_vitals_agg\nbsat_anomaly_score\nbsat_patient_risk_profile
+
+bv -> marts : mart_patient_daily_features\nmart_anomaly_dashboard
+
+marts -> ml : PyArrow read\n(pinned to Iceberg snapshot)
+
+== One-time seed ==
+
+note over sim, rv
+  Synthea patients.csv / conditions.csv →
+  hub_patient, hub_device, hub_metric_type
+  sat_patient_demographics, sat_device_spec
+end note
+
+@enduml

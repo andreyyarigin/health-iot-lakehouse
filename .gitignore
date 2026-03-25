@@ -1,0 +1,66 @@
+# ============================================================
+# health-iot-lakehouse — .gitignore
+# ============================================================
+
+# Environment variables — NEVER commit
+.env
+
+# Claude Code (local only)
+.claude/
+CLAUDE.md
+
+# Project docs (local only — detailed text docs, not diagrams)
+docs/ARCHITECTURE.md
+docs/DATA_VAULT_MODEL.md
+docs/ДОКУМЕНТАЦИЯ.md
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# dbt
+dbt_project/target/
+dbt_project/logs/
+dbt_project/.user.yml
+dbt_project/dbt_packages/
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Simulator output (generated data — not committed)
+data/output/
+
+# Synthea generated output (large, generated files)
+synthea/output/*.json
+synthea/output/**/*.json
+synthea/output/fhir/
+synthea/output/metadata/
+
+# Docker volumes (never in git)
+postgres-data/
+minio-data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.log
+/tmp/

@@ -1,0 +1,319 @@
+# ============================================================
+# health-iot-lakehouse — Docker Compose
+#
+# Services:
+#   minio        — S3-compatible object storage (data lake)
+#   postgres     — metadata backend for Iceberg catalog + Airflow
+#   iceberg-rest — Apache Iceberg REST Catalog
+#   trino        — distributed SQL engine (Iceberg connector)
+#   airflow-init — one-shot container: DB migrations + admin user
+#   airflow      — Airflow webserver + scheduler (LocalExecutor)
+#
+# All services share the `lakehouse-net` bridge network.
+# Credentials are loaded from .env (copy from .env.example).
+# ============================================================
+
+version: "3.9"
+
+# ─── Shared network ──────────────────────────────────────────
+networks:
+  lakehouse-net:
+    driver: bridge
+
+# ─── Named volumes ───────────────────────────────────────────
+volumes:
+  minio-data:
+  postgres-data:
+  airflow-logs:
+  airflow-dags:
+  airflow-plugins:
+
+# ─── Re-usable Airflow environment fragment ──────────────────
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.3
+  env_file: .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: ${AIRFLOW__CORE__EXECUTOR:-CeleryExecutor}
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+    AIRFLOW__CELERY__BROKER_URL: ${AIRFLOW__CELERY__BROKER_URL}
+    AIRFLOW__CELERY__RESULT_BACKEND: ${AIRFLOW__CELERY__RESULT_BACKEND}
+    # Give DAGs access to MinIO
+    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    - airflow-plugins:/opt/airflow/plugins
+  networks:
+    - lakehouse-net
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+# ─── Services ────────────────────────────────────────────────
+services:
+
+  # ----------------------------------------------------------
+  # MinIO — object storage
+  # API:     http://localhost:9000
+  # Console: http://localhost:9001
+  # ----------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: lh-minio
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------
+  # MinIO bucket initializer — runs once at startup.
+  # Uses the mc (MinIO client) bundled in the MinIO image to
+  # create the `warehouse` and `raw` buckets and seed the
+  # expected landing-zone prefix structure.
+  # ----------------------------------------------------------
+  minio-init:
+    image: minio/minio:latest
+    container_name: lh-minio-init
+    restart: "no"
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ALIAS: ${MINIO_ALIAS:-local}
+      MINIO_WAREHOUSE_BUCKET: ${MINIO_WAREHOUSE_BUCKET:-warehouse}
+      MINIO_RAW_BUCKET: ${MINIO_RAW_BUCKET:-raw}
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Waiting for MinIO to be ready...';
+        until mc alias set ${MINIO_ALIAS:-local} http://minio:9000
+              ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; do
+          sleep 2;
+        done;
+        /scripts/init_minio_buckets.sh;
+        echo 'MinIO init complete.';
+      "
+    volumes:
+      - ./scripts:/scripts:ro
+    networks:
+      - lakehouse-net
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # PostgreSQL 16 — metadata backend
+  # Hosts two databases:
+  #   iceberg_catalog  — Iceberg REST Catalog tables
+  #   airflow_metadata — Airflow state
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: lh-postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Primary DB used by Iceberg catalog
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Create the Airflow metadata DB alongside the Iceberg catalog DB
+      - ./scripts/postgres_init.sh:/docker-entrypoint-initdb.d/01_airflow_db.sh:ro
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ----------------------------------------------------------
+  # Iceberg REST Catalog — table metadata registry
+  # Endpoint: http://localhost:8181
+  # ----------------------------------------------------------
+  iceberg-rest:
+    image: tabulario/iceberg-rest:latest
+    container_name: lh-iceberg-rest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # JDBC backend
+      CATALOG_CATALOG_IMPL: org.apache.iceberg.jdbc.JdbcCatalog
+      CATALOG_URI: jdbc:postgresql://${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB}?user=${POSTGRES_USER}&password=${POSTGRES_PASSWORD}
+      # Warehouse root in MinIO
+      CATALOG_WAREHOUSE: ${ICEBERG_WAREHOUSE:-s3://warehouse}
+      # S3/MinIO connectivity
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_ACCESS__KEY__ID: ${MINIO_ACCESS_KEY}
+      CATALOG_S3_SECRET__ACCESS__KEY: ${MINIO_SECRET_KEY}
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_REGION: us-east-1
+    ports:
+      - "8181:8181"
+    networks:
+      - lakehouse-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q '1FF5' /proc/net/tcp6 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # ----------------------------------------------------------
+  # Trino — distributed SQL engine
+  # UI: http://localhost:8080
+  # ----------------------------------------------------------
+  trino:
+    image: trinodb/trino:latest
+    container_name: lh-trino
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8090:8080"
+    volumes:
+      - ./trino/config.properties:/etc/trino/config.properties:ro
+      - ./trino/jvm.config:/etc/trino/jvm.config:ro
+      - ./trino/log.properties:/etc/trino/log.properties:ro
+      - ./trino/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties:ro
+    networks:
+      - lakehouse-net
+    depends_on:
+      iceberg-rest:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/info | grep -q '\"starting\":false' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+    environment:
+      # Pass MinIO credentials into the container environment so that
+      # the iceberg.properties substitution works at runtime.
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+
+  # ----------------------------------------------------------
+  # Redis — Celery message broker
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: lh-redis
+    restart: unless-stopped
+    networks:
+      - lakehouse-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------
+  # Airflow — one-shot init container
+  # Runs DB migrations and creates the admin user, then exits.
+  # ----------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    container_name: lh-airflow-init
+    restart: "no"
+    entrypoint: >
+      /bin/bash -c "
+        pip install apache-airflow-providers-celery apache-airflow-providers-redis &&
+        airflow db migrate &&
+        airflow users create --username ${AIRFLOW_ADMIN_USER:-admin} --password ${AIRFLOW_ADMIN_PASSWORD:-admin} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL:-admin@example.com} || true
+      "
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # Airflow — webserver only
+  # UI: http://localhost:8082
+  # ----------------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: lh-airflow-webserver
+    restart: unless-stopped
+    command: webserver
+    ports:
+      - "${AIRFLOW_PORT:-8082}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health | grep -q 'healthy' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ----------------------------------------------------------
+  # Airflow — scheduler only
+  # ----------------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: lh-airflow-scheduler
+    restart: unless-stopped
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $(hostname) || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ----------------------------------------------------------
+  # Airflow — Celery worker (1 instance)
+  # ----------------------------------------------------------
+  airflow-worker:
+    <<: *airflow-common
+    container_name: lh-airflow-worker
+    restart: unless-stopped
+    command: celery worker
+    healthcheck:
+      test: ["CMD-SHELL", "celery --app airflow.executors.celery_executor.app inspect ping -d celery@$(hostname) || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully

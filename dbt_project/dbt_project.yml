@@ -1,0 +1,44 @@
+name: health_iot_lakehouse
+version: "1.0.0"
+config-version: 2
+
+profile: health_iot_lakehouse
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  health_iot_lakehouse:
+    staging:
+      +materialized: view
+      +schema: staging
+
+    raw_vault:
+      +materialized: incremental
+      +schema: raw_vault
+      hubs:
+        +materialized: incremental
+      links:
+        +materialized: incremental
+      satellites:
+        +materialized: incremental
+
+    business_vault:
+      +materialized: incremental
+      +schema: business_vault
+
+    marts:
+      +materialized: table
+      +schema: marts
+
+vars:
+  load_date: "{{ run_started_at.strftime('%Y-%m-%d') }}"

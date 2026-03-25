@@ -1,0 +1,57 @@
+# ============================================================
+# OpenMetadata — Trino connector configuration
+#
+# Ingests table metadata (schemas, columns, data types) from
+# all Iceberg schemas including source landing zones.
+#
+# Run from project root:
+#   metadata ingest -c openmetadata/ingestion/trino_connector.yaml
+#
+# Get a fresh JWT token:
+#   python3 scripts/get_om_token.py
+# ============================================================
+
+source:
+  type: trino
+  serviceName: health-iot-trino
+  serviceConnection:
+    config:
+      type: Trino
+      hostPort: "localhost:8090"
+      catalog: iceberg
+      username: admin
+      # No password — Trino runs without authentication in this setup
+
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+      databaseFilterPattern:
+        includes:
+          - "iceberg"
+      schemaFilterPattern:
+        includes:
+          - "staging"
+          - "raw_vault"
+          - "business_vault"
+          - "marts"
+          - "synthea"      # source: Synthea patient CSV landing zone
+          - "wearable"     # source: wearable simulator NDJSON landing zone
+      tableFilterPattern:
+        includes:
+          - ".*"
+      includeTables: true
+      includeViews: true
+      markDeletedTables: false
+      threads: 2
+
+sink:
+  type: metadata-rest
+  config: {}
+
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: "http://localhost:8585/api"
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: "REPLACE_WITH_JWT_TOKEN"

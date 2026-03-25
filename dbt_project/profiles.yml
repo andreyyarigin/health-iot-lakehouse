@@ -1,0 +1,15 @@
+health_iot_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      method: none
+      user: admin
+      host: "{{ env_var('TRINO_HOST', 'localhost') }}"
+      port: "{{ env_var('TRINO_PORT', '8080') | int }}"
+      database: iceberg
+      schema: default
+      threads: 4
+      trino_catalog: iceberg
+      session_properties:
+        query_max_run_time: 10m

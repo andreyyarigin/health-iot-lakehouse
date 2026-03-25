@@ -1,0 +1,120 @@
+version: 2
+
+models:
+  - name: hub_patient
+    description: >
+      Data Vault hub for the patient business entity.
+      Business key: patient_id (Synthea UUID). Insert-only, append strategy.
+    columns:
+      - name: patient_hk
+        description: MD5 surrogate key derived from patient_bk
+        tests:
+          - not_null
+          - unique
+      - name: patient_bk
+        description: Synthea patient UUID (natural/business key)
+        tests:
+          - not_null
+          - unique
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+
+  - name: hub_device
+    description: >
+      Data Vault hub for wearable devices (smartwatches and CGMs).
+      Business key: device_serial (e.g. "GRM-W0042").
+    columns:
+      - name: device_hk
+        description: MD5 surrogate key derived from device_serial_bk
+        tests:
+          - not_null
+          - unique
+      - name: device_serial_bk
+        description: Device serial number (natural/business key)
+        tests:
+          - not_null
+          - unique
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+
+  - name: hub_metric_type
+    description: >
+      Data Vault hub for health metric types (reference domain).
+      Business key: metric_code (e.g. "heart_rate", "spo2").
+    columns:
+      - name: metric_type_hk
+        description: MD5 surrogate key derived from metric_code_bk
+        tests:
+          - not_null
+          - unique
+      - name: metric_code_bk
+        description: Metric code string (natural/business key)
+        tests:
+          - not_null
+          - unique
+          - accepted_values:
+              values:
+                - heart_rate
+                - spo2
+                - steps
+                - skin_temperature
+                - blood_glucose
+                - sleep_stage
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+
+  - name: hub_reading
+    description: >
+      Data Vault hub for individual measurement events.
+      Business key: reading_id (UUID from simulator). High-volume hub.
+    columns:
+      - name: reading_hk
+        description: MD5 surrogate key derived from reading_id_bk
+        tests:
+          - not_null
+          - unique
+      - name: reading_id_bk
+        description: Reading UUID (natural/business key)
+        tests:
+          - not_null
+          - unique
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+
+  - name: hub_alert
+    description: >
+      Data Vault hub for threshold-breach alert events.
+      Business key: alert_id (UUID from alert generator).
+    columns:
+      - name: alert_hk
+        description: MD5 surrogate key derived from alert_id_bk
+        tests:
+          - not_null
+          - unique
+      - name: alert_id_bk
+        description: Alert UUID (natural/business key)
+        tests:
+          - not_null
+          - unique
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null

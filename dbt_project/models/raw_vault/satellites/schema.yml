@@ -1,0 +1,206 @@
+version: 2
+
+models:
+  - name: sat_patient_demographics
+    description: >
+      Raw vault satellite for patient descriptive attributes. Sourced from
+      Synthea (demographics) and conditions (chronic condition SNOMED codes).
+      Insert-only with hash_diff change detection.
+    columns:
+      - name: patient_hk
+        description: FK to hub_patient
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_patient')
+              field: patient_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: hash_diff
+        tests:
+          - not_null
+      - name: effective_from
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: birth_date
+        tests:
+          - not_null
+      - name: gender
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["M", "F"]
+      - name: race
+        tests:
+          - not_null
+      - name: ethnicity
+        tests:
+          - not_null
+
+  - name: sat_device_spec
+    description: >
+      Raw vault satellite for device technical specifications. Device model
+      and manufacturer are derived from the serial number prefix pattern.
+    columns:
+      - name: device_hk
+        description: FK to hub_device
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_device')
+              field: device_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: hash_diff
+        tests:
+          - not_null
+      - name: effective_from
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: device_model
+        tests:
+          - not_null
+      - name: manufacturer
+        tests:
+          - not_null
+      - name: firmware_version
+        tests:
+          - not_null
+
+  - name: sat_reading_value
+    description: >
+      Core high-volume satellite storing actual measurement values.
+      Partitioned by day(measured_at). Denormalized patient_hk and device_hk
+      for query performance. Append-only.
+    columns:
+      - name: reading_hk
+        description: FK to hub_reading
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_reading')
+              field: reading_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: hash_diff
+        tests:
+          - not_null
+      - name: effective_from
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: patient_hk
+        description: Denormalized FK to hub_patient for query performance
+        tests:
+          - not_null
+      - name: device_hk
+        description: Denormalized FK to hub_device for query performance
+        tests:
+          - not_null
+      - name: metric_code
+        tests:
+          - not_null
+      - name: value
+        tests:
+          - not_null
+      - name: unit
+        tests:
+          - not_null
+      - name: quality_flag
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["good", "noisy", "interpolated"]
+      - name: measured_at
+        tests:
+          - not_null
+
+  - name: sat_reading_context
+    description: >
+      Contextual information about readings — activity type and location type.
+      Separated from sat_reading_value because context may not be available for
+      every reading and changes at a different grain.
+    columns:
+      - name: reading_hk
+        description: FK to hub_reading
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_reading')
+              field: reading_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: hash_diff
+        tests:
+          - not_null
+      - name: effective_from
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: activity_type
+        tests:
+          - accepted_values:
+              values:
+                - resting
+                - walking
+                - running
+                - driving
+                - sleeping
+
+  - name: sat_alert_detail
+    description: >
+      Descriptive attributes of threshold-breach alert events. Includes
+      severity, metric context, and acknowledgment status.
+    columns:
+      - name: alert_hk
+        description: FK to hub_alert
+        tests:
+          - not_null
+          - relationships:
+              to: ref('hub_alert')
+              field: alert_hk
+      - name: load_datetime
+        tests:
+          - not_null
+      - name: hash_diff
+        tests:
+          - not_null
+      - name: effective_from
+        tests:
+          - not_null
+      - name: record_source
+        tests:
+          - not_null
+      - name: alert_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["threshold_breach", "trend_anomaly", "missing_data"]
+      - name: severity
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["info", "warning", "critical"]
+      - name: metric_code
+        tests:
+          - not_null
+      - name: triggered_at
+        tests:
+          - not_null
+      - name: acknowledged
+        tests:
+          - not_null

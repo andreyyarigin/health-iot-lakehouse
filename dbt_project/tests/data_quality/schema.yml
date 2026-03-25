@@ -1,0 +1,26 @@
+version: 2
+
+# This file documents the custom data quality tests in tests/data_quality/.
+# dbt discovers these as singular tests automatically from the tests/ directory.
+# No schema.yml entries are required for singular tests to run — this file
+# exists for documentation purposes only.
+
+# To run only the data quality tests:
+#   cd dbt_project && dbt test --select test_type:singular
+
+# Test descriptions:
+
+# assert_hr_in_range.sql
+#   Checks that all heart_rate readings in sat_reading_value are within
+#   the physiologically plausible range [20, 300] bpm.
+#   Expected behavior: empty result set (0 rows).
+
+# assert_spo2_in_range.sql
+#   Checks that all spo2 readings in sat_reading_value are within
+#   the physiologically plausible range [70, 100] %.
+#   Expected behavior: empty result set (0 rows).
+
+# assert_device_freshness.sql
+#   Checks that every known device in hub_device has had at least one
+#   reading in sat_reading_value within the last 25 hours.
+#   Expected behavior: empty result set (0 rows = all devices fresh).

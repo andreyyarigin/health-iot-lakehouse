@@ -1,0 +1,58 @@
+# ============================================================
+# OpenMetadata — dbt connector configuration
+#
+# Ingests dbt lineage, model descriptions, tags, and tests
+# from the compiled dbt manifest.
+#
+# Prerequisites:
+#   1. Run Trino ingestion first (trino_connector.yaml)
+#   2. Compile dbt artifacts:
+#      cd dbt_project && dbt compile && dbt docs generate
+#   3. Then run this connector.
+#
+# Run:
+#   metadata ingest -c openmetadata/ingestion/dbt_connector.yaml
+# ============================================================
+
+source:
+  type: dbt
+  # Must match the serviceName used in trino_connector.yaml
+  serviceName: health-iot-trino
+  sourceConfig:
+    config:
+      type: DBT
+      dbtConfigSource:
+        dbtConfigType: local
+        # Paths inside the container running this command.
+        # Mount the dbt_project directory accordingly, or adjust
+        # these paths if running metadata CLI on the host.
+        dbtManifestFilePath: "/dbt_project/target/manifest.json"
+        dbtCatalogFilePath: "/dbt_project/target/catalog.json"
+        dbtRunResultsFilePath: "/dbt_project/target/run_results.json"
+
+      dbtUpdateDescriptions: true
+      dbtUpdateOwners: false
+      includeTags: true
+      dbtClassificationName: "dbt_tag"
+
+      # Only process models that belong to our schemas
+      schemaFilterPattern:
+        includes:
+          - "staging"
+          - "raw_vault"
+          - "business_vault"
+          - "marts"
+
+sink:
+  type: metadata-rest
+  config: {}
+
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: "http://om-server:8585/api"
+    authProvider: openmetadata
+    securityConfig:
+      # Replace with the actual bot JWT token from OpenMetadata UI:
+      # Settings → Bots → ingestion-bot → Token
+      jwtToken: "REPLACE_WITH_JWT_TOKEN"

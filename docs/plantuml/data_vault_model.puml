@@ -1,0 +1,157 @@
+@startuml data_vault_model
+skinparam backgroundColor #FAFAFA
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #555555
+skinparam ArrowThickness 1.5
+skinparam linetype ortho
+
+skinparam entity {
+  BackgroundColor #E8F4FD
+  BorderColor #2980B9
+  FontColor #1A1A1A
+}
+
+title Health IoT Lakehouse — Data Vault 2.0 Model
+
+' ── HUBS ──────────────────────────────────────────────
+entity "hub_patient" as hub_p <<Hub>> {
+  * patient_hk : varchar PK
+  --
+  patient_bk : varchar
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+entity "hub_device" as hub_d <<Hub>> {
+  * device_hk : varchar PK
+  --
+  device_bk : varchar
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+entity "hub_metric_type" as hub_m <<Hub>> {
+  * metric_type_hk : varchar PK
+  --
+  metric_code : varchar
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+entity "hub_reading" as hub_r <<Hub>> {
+  * reading_hk : varchar PK
+  --
+  reading_bk : varchar
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+entity "hub_alert" as hub_a <<Hub>> {
+  * alert_hk : varchar PK
+  --
+  alert_bk : varchar
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+' ── LINKS ─────────────────────────────────────────────
+entity "lnk_patient_device" as lnk_pd <<Link>> {
+  * patient_device_hk : varchar PK
+  --
+  patient_hk : varchar FK
+  device_hk : varchar FK
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+entity "lnk_device_metric" as lnk_dm <<Link>> {
+  * device_metric_hk : varchar PK
+  --
+  device_hk : varchar FK
+  metric_type_hk : varchar FK
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+entity "lnk_reading_alert" as lnk_ra <<Link>> {
+  * reading_alert_hk : varchar PK
+  --
+  reading_hk : varchar FK
+  alert_hk : varchar FK
+  load_datetime : timestamp
+  record_source : varchar
+}
+
+' ── SATELLITES ────────────────────────────────────────
+entity "sat_patient_demographics" as sat_pd <<Satellite>> {
+  * patient_hk : varchar FK
+  * load_datetime : timestamp
+  --
+  hash_diff : varchar
+  first_name, last_name : varchar
+  birthdate : date
+  sex, race, ethnicity : varchar
+  record_source : varchar
+}
+
+entity "sat_device_spec" as sat_ds <<Satellite>> {
+  * device_hk : varchar FK
+  * load_datetime : timestamp
+  --
+  hash_diff : varchar
+  model, manufacturer : varchar
+  device_type : varchar
+  record_source : varchar
+}
+
+entity "sat_reading_value" as sat_rv <<Satellite>> {
+  * reading_hk : varchar FK
+  * load_datetime : timestamp
+  --
+  hash_diff : varchar
+  patient_hk : varchar
+  device_hk : varchar
+  metric_code : varchar
+  value : double
+  measured_at : timestamp
+  record_source : varchar
+}
+
+entity "sat_reading_context" as sat_rc <<Satellite>> {
+  * reading_hk : varchar FK
+  * load_datetime : timestamp
+  --
+  hash_diff : varchar
+  is_anomaly : boolean
+  anomaly_type : varchar
+  record_source : varchar
+}
+
+entity "sat_alert_detail" as sat_ad <<Satellite>> {
+  * alert_hk : varchar FK
+  * load_datetime : timestamp
+  --
+  hash_diff : varchar
+  alert_type : varchar
+  severity : varchar
+  metric_code : varchar
+  triggered_value : double
+  record_source : varchar
+}
+
+' ── RELATIONSHIPS ─────────────────────────────────────
+hub_p ||--o{ lnk_pd
+hub_d ||--o{ lnk_pd
+hub_d ||--o{ lnk_dm
+hub_m ||--o{ lnk_dm
+hub_r ||--o{ lnk_ra
+hub_a ||--o{ lnk_ra
+
+hub_p ||--o{ sat_pd
+hub_d ||--o{ sat_ds
+hub_r ||--o{ sat_rv
+hub_r ||--o{ sat_rc
+hub_a ||--o{ sat_ad
+
+@enduml
