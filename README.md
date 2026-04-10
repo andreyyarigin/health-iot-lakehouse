@@ -1,131 +1,141 @@
 # health-iot-lakehouse
 
-Lakehouse platform for wearable health data with 24-hour health anomaly prediction.
+Lakehouse-платформа для данных носимых устройств здоровья с предсказанием аномалий за 24 часа.
 
-Vitals (heart rate, SpO2, steps, skin temperature, glucose) flow from raw files to ML-ready features through a Data Vault 2.0 model on Apache Iceberg. The full stack runs locally via Docker Compose.
-
----
-
-## Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Object storage | **MinIO** (S3-compatible) |
-| Table format | **Apache Iceberg** + REST Catalog (PostgreSQL backend) |
-| Compute engine | **Trino** |
-| Transformations | **dbt-trino** |
-| Orchestration | **Apache Airflow** (CeleryExecutor) + Redis |
-| Data catalog | **OpenMetadata** |
-| Data generation | **Synthea** + custom Python simulator |
+Показатели жизнедеятельности (пульс, SpO2, шаги, температура кожи, глюкоза) проходят путь от сырых файлов до ML-готовых признаков через модель Data Vault 2.0 на Apache Iceberg. Полный стек запускается локально через Docker Compose.
 
 ---
 
-## Architecture
+## Стек
+
+| Слой | Технология |
+|------|-----------|
+| Объектное хранилище | **MinIO** (S3-совместимое) |
+| Формат таблиц | **Apache Iceberg** + REST Catalog (PostgreSQL backend) |
+| Вычислительный движок | **Trino** |
+| Трансформации | **dbt-trino** |
+| Оркестрация | **Apache Airflow** (CeleryExecutor) + Redis |
+| Каталог данных | **OpenMetadata** |
+| Генерация данных | **Synthea** + кастомный Python-симулятор |
+
+---
+
+## Архитектура
 
 ![Architecture](docs/plantuml/architecture.png)
 
 ---
 
-## Repository structure
+## Структура репозитория
 
 ```
 health-iot-lakehouse/
-├── docker-compose.yml                # Main stack
-├── docker-compose.openmetadata.yml   # OpenMetadata stack
-├── .env.example                      # Environment variables template
+├── docker-compose.yml                # Основной стек
+├── docker-compose.openmetadata.yml   # Стек OpenMetadata
+├── .env.example                      # Шаблон переменных окружения
 ├── docs/
-│   ├── ARCHITECTURE.md               # Component descriptions and data flow
-│   ├── DATA_VAULT_MODEL.md           # Data Vault 2.0 entity reference
-│   └── ДОКУМЕНТАЦИЯ.md               # Full documentation in Russian
-├── simulator/                        # Python wearable simulator
-├── synthea/output/csv/               # Pre-generated synthetic patients (10)
+│   ├── ARCHITECTURE.md               # Описание компонентов и поток данных (EN)
+│   ├── ARCHITECTURE_RU.md            # Описание компонентов и поток данных (RU)
+│   ├── DATA_VAULT_MODEL.md           # Справочник Data Vault 2.0 (EN)
+│   └── DATA_VAULT_MODEL_RU.md        # Справочник Data Vault 2.0 (RU)
+├── simulator/                        # Python-симулятор носимых устройств
+├── synthea/output/csv/               # Предгенерированные синтетические пациенты (10)
 ├── airflow/dags/                     # daily_ingest, dbt_raw_vault, dbt_business_vault
-├── dbt_project/models/               # 22 models: staging → raw_vault → business_vault → marts
-├── openmetadata/ingestion/           # Trino and dbt ingestion configs
-├── notebooks/                        # Feature exploration, ML prototype
-├── scripts/                          # Stack initialization scripts
-└── trino/                            # Trino config + Iceberg connector
+├── dbt_project/models/               # 22 модели: staging → raw_vault → business_vault → marts
+├── openmetadata/ingestion/           # Конфиги ingestion для Trino и dbt
+├── notebooks/                        # Исследование признаков, прототип ML
+├── scripts/                          # Скрипты инициализации стека
+└── trino/                            # Конфигурация Trino + Iceberg connector
 ```
 
 ---
 
-## ML use case
+## ML-кейс
 
-**Goal:** predict anomalous vital events (arrhythmia, hypoxemia, hypo/hyperglycemia) 24 hours ahead based on wearable data patterns.
+**Цель:** предсказать аномальные события (аритмия, гипоксемия, гипо/гипергликемия) за 24 часа на основе паттернов данных носимых устройств.
 
-**Features** from `mart_patient_daily_features`:
-- Patient demographics: age, sex, BMI, chronic conditions
-- Daily vitals: mean/std/min/max of HR, SpO2, steps, skin temperature, glucose
-- Temporal patterns: 7-day rolling averages, day-over-day deltas
-- Risk profile: risk tier, anomaly events in the last 30 days
+**Признаки** из `mart_patient_daily_features`:
+- Демография пациента: возраст, пол, ИМТ, хронические заболевания
+- Дневные показатели: mean/std/min/max для HR, SpO2, шагов, температуры кожи, глюкозы
+- Временные паттерны: 7-дневные скользящие средние, дневные дельты
+- Профиль риска: уровень риска, аномальные события за последние 30 дней
 
-**Target:** binary label `anomaly_next_24h`
+**Целевая переменная:** бинарная метка `anomaly_next_24h`
 
-**Reproducibility:** Iceberg snapshots pin the training dataset to a specific data version.
+**Воспроизводимость:** снимки Iceberg фиксируют обучающий датасет к конкретной версии данных.
 
 ---
 
-## Daily data flow
+## Ежедневный поток данных
 
 ![Data Flow](docs/plantuml/data_flow.png)
 
 ---
 
-## Quick start
+## Быстрый старт
 
-**Requirements:** Docker Desktop (≥ 8 GB RAM), Python 3.11+
+**Требования:** Docker Desktop (≥ 8 ГБ RAM), Python 3.11+
 
 ```bash
-# 1. Start the main stack
+# 1. Запуск основного стека
 cp .env.example .env
-# Fill in passwords in .env, then:
+# Заполнить пароли в .env, затем:
 docker compose up -d
 
-# 2. Initialize schemas and seed data
+# 2. Инициализация схем и начальных данных
 bash scripts/seed_data.sh
 
-# 3. Generate simulator data
+# 3. Генерация данных симулятора
 pip install -r simulator/requirements.txt
 python -m simulator.cli generate-day --date 2026-03-25
 
-# 4. Run dbt models
+# 4. Запуск dbt-моделей
 cd dbt_project
 TRINO_PORT=8090 dbt deps && dbt run && dbt test
 
-# 5. Start OpenMetadata (optional, needs extra RAM)
+# 5. Запуск OpenMetadata (опционально, требует доп. RAM)
 docker compose -f docker-compose.openmetadata.yml up -d
 ```
 
 ---
 
-## Service endpoints
+## Эндпоинты сервисов
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
+| Сервис | URL | Учётные данные |
+|--------|-----|----------------|
 | **OpenMetadata** | http://localhost:8585 | admin@openmetadata.org / admin |
 | **Airflow** | http://localhost:8082 | admin / admin |
-| **Trino UI** | http://localhost:8090 | admin (no password) |
-| **MinIO Console** | http://localhost:9011 | from .env |
+| **Trino UI** | http://localhost:8090 | admin (без пароля) |
+| **MinIO Console** | http://localhost:9011 | из .env |
 | Iceberg REST | http://localhost:8181 | — |
-| PostgreSQL | localhost:5433 | from .env |
+| PostgreSQL | localhost:5433 | из .env |
 
 ---
 
-## Data Vault model
+## Модель Data Vault
 
 ![Data Vault Model](docs/plantuml/data_vault_model.png)
 
 ---
 
-## Data quality
+## Качество данных
 
-- dbt tests: range checks (HR 30–250, SpO2 70–100%), not-null, unique, referential integrity — 206 tests passing
-- Freshness monitoring: devices silent >24h flagged as stale
-- Audit columns on every satellite row: `load_datetime`, `record_source`, `hash_diff`
-- Full lineage graph in OpenMetadata: source CSV → staging → raw vault → marts
+- dbt-тесты: проверки диапазонов (HR 30–250, SpO2 70–100%), not-null, unique, ссылочная целостность — 206 тестов проходят
+- Мониторинг свежести: устройства, молчащие более 24 часов, помечаются как устаревшие
+- Колонки аудита в каждой строке спутника: `load_datetime`, `record_source`, `hash_diff`
+- Полный граф линейности в OpenMetadata: источник CSV → staging → raw vault → marts
 
 ---
 
-## License
+## Документация
+
+- [Architecture / Архитектура (EN)](docs/ARCHITECTURE.md)
+- [Архитектура (RU)](docs/ARCHITECTURE_RU.md)
+- [Data Vault Model (EN)](docs/DATA_VAULT_MODEL.md)
+- [Модель Data Vault (RU)](docs/DATA_VAULT_MODEL_RU.md)
+
+---
+
+## Лицензия
 
 MIT
